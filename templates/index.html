@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Chat Aula</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body>
+    <div id="chat-container">
+        <div class="header">
+            <input type="text" id="username" placeholder="Tu nombre..." maxlength="12">
+            <select id="room-select">
+                <option value="General">Sala General</option>
+                <option value="Aula 1">Aula 1</option>
+                <option value="Aula 2">Aula 2</option>
+            </select>
+            <span id="user-stats">👥 0</span>
+        </div>
+        
+        <div id="messages"></div>
+        <div id="typing-indicator"></div>
+
+        <div class="input-area">
+            <input type="text" id="myMessage" placeholder="Escribe..." autocomplete="off">
+            <button id="sendButton">➤</button>
+        </div>
+    </div>
+
+    <audio id="chatSound" src="https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3"></audio>
+
+    <script>
+        const socket = io();
+        const msgInput = document.getElementById('myMessage');
+        const userInput = document.getElementById('username');
+        const roomSelect = document.getElementById('room-select');
+        const messagesDiv = document.getElementById('messages');
+        const typingDiv = document.getElementById('typing-indicator');
+
+        let currentRoom = roomSelect.value;
+
+        // Unirse a sala al empezar o cambiar
+        function joinRoom() {
+            const user = userInput.value || "Anónimo";
+            socket.emit('join', {user: user, room: currentRoom});
+        }
+        joinRoom();
+
+        roomSelect.onchange = () => {
+            messagesDiv.innerHTML = ""; // Limpiar chat al cambiar de sala
+            currentRoom = roomSelect.value;
+            joinRoom();
+        };
+
+        function sendMessage() {
+            const text = msgInput.value.trim();
+            if (text) {
+                socket.emit('message', {
+                    name: userInput.value || "Anónimo", 
+                    text: text, 
+                    room: currentRoom
+                });
+                msgInput.value = '';
+            }
+        }
+
+        // Detectar si estoy escribiendo
+        msgInput.oninput = () => {
+            socket.emit('typing', {user: userInput.value, room: currentRoom});
+        };
+
+        socket.on('message', (data) => {
+            const p = document.createElement('div');
+            p.className = 'message-bubble';
+            p.innerHTML = `<strong>${data.name}</strong><span>${data.text}</span>`;
+            messagesDiv.appendChild(p);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            if(data.name !== userInput.value) document.getElementById('chatSound').play();
+        });
+
+        socket.on('update_users', (count) => {
+            document.getElementById('user-stats').innerText = `👥 ${count}`;
+        });
+
+        socket.on('status', (data) => {
+            const p = document.createElement('em');
+            p.innerText = data.msg;
+            messagesDiv.appendChild(p);
+        });
+
+        let typingTimer;
+        socket.on('display_typing', (data) => {
+            typingDiv.innerText = `${data.user} está escribiendo...`;
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(() => { typingDiv.innerText = ""; }, 2000);
+        });
+
+        document.getElementById('sendButton').onclick = sendMessage;
+    </script>
+</body>
+</html>
