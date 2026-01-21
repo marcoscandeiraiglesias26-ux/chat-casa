@@ -3,27 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Chat Aula</title>
+    <title>AulaChat Pro</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
     <div id="chat-container">
         <div class="header">
-            <input type="text" id="username" placeholder="Tu nombre..." maxlength="12">
+            <input type="text" id="username" placeholder="Nombre..." maxlength="12">
             <select id="room-select">
                 <option value="General">Sala General</option>
-                <option value="Aula 1">Aula 1</option>
-                <option value="Aula 2">Aula 2</option>
+                <option value="Dudas">Dudas</option>
+                <option value="Juegos">Juegos</option>
             </select>
             <span id="user-stats">👥 0</span>
+        </div>
+
+        <div class="actions">
+            <button class="btn-clear" onclick="clearHistory()">🗑️ Limpiar chat local</button>
         </div>
         
         <div id="messages"></div>
         <div id="typing-indicator"></div>
 
         <div class="input-area">
-            <input type="text" id="myMessage" placeholder="Escribe..." autocomplete="off">
+            <label for="file-input" style="cursor:pointer; font-size: 22px;">📎</label>
+            <input type="file" id="file-input" style="display:none;">
+            <input type="text" id="myMessage" placeholder="Escribe un mensaje..." autocomplete="off">
             <button id="sendButton">➤</button>
         </div>
     </div>
@@ -40,64 +46,74 @@
 
         let currentRoom = roomSelect.value;
 
-        // Unirse a sala al empezar o cambiar
-        function joinRoom() {
-            const user = userInput.value || "Anónimo";
-            socket.emit('join', {user: user, room: currentRoom});
-        }
-        joinRoom();
-
-        roomSelect.onchange = () => {
-            messagesDiv.innerHTML = ""; // Limpiar chat al cambiar de sala
-            currentRoom = roomSelect.value;
-            joinRoom();
-        };
-
-        function sendMessage() {
-            const text = msgInput.value.trim();
-            if (text) {
-                socket.emit('message', {
-                    name: userInput.value || "Anónimo", 
-                    text: text, 
-                    room: currentRoom
-                });
-                msgInput.value = '';
+        function clearHistory() {
+            if(confirm("¿Quieres limpiar los mensajes de tu pantalla?")) {
+                messagesDiv.innerHTML = "";
             }
         }
 
-        // Detectar si estoy escribiendo
-        msgInput.oninput = () => {
-            socket.emit('typing', {user: userInput.value, room: currentRoom});
-        };
+        function stringToColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            return `hsl(${Math.abs(hash) % 360}, 65%, 40%)`;
+        }
 
         socket.on('message', (data) => {
+            // Opacidad para mensajes anteriores
+            messagesDiv.querySelectorAll('.message-bubble').forEach(m => m.style.opacity = "0.7");
+
             const p = document.createElement('div');
-            p.className = 'message-bubble';
-            p.innerHTML = `<strong>${data.name}</strong><span>${data.text}</span>`;
+            const isMe = data.name === (userInput.value || "Anónimo");
+            p.className = `message-bubble ${isMe ? 'my-message' : ''}`;
+            
+            let content = `<strong style="color:${stringToColor(data.name)}">${data.name}</strong>`;
+            content += `<span>${data.text}</span>`;
+            
+            if (data.file) {
+                if (data.fileType.startsWith('image/')) {
+                    content += `<img src="${data.file}" style="max-width:100%; border-radius:5px; margin-top:5px; display:block;">`;
+                } else {
+                    content += `<a href="${data.file}" download="${data.fileName}" class="file-link">📁 ${data.fileName}</a>`;
+                }
+            }
+            
+            p.innerHTML = content;
             messagesDiv.appendChild(p);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
             
-            if(data.name !== userInput.value) document.getElementById('chatSound').play();
+            if(!isMe) document.getElementById('chatSound').play();
         });
 
-        socket.on('update_users', (count) => {
-            document.getElementById('user-stats').innerText = `👥 ${count}`;
-        });
+        // Eventos básicos (Join, Typing, etc.)
+        roomSelect.onchange = () => { 
+            messagesDiv.innerHTML = ""; 
+            currentRoom = roomSelect.value; 
+            socket.emit('join', {user: userInput.value || "Anónimo", room: currentRoom});
+        };
 
-        socket.on('status', (data) => {
-            const p = document.createElement('em');
-            p.innerText = data.msg;
-            messagesDiv.appendChild(p);
-        });
+        document.getElementById('sendButton').onclick = () => {
+            if(msgInput.value.trim()){
+                socket.emit('message', {name: userInput.value || "Anónimo", text: msgInput.value, room: currentRoom});
+                msgInput.value = '';
+            }
+        };
 
-        let typingTimer;
-        socket.on('display_typing', (data) => {
-            typingDiv.innerText = `${data.user} está escribiendo...`;
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(() => { typingDiv.innerText = ""; }, 2000);
-        });
+        msgInput.onkeypress = (e) => { if(e.key === 'Enter') document.getElementById('sendButton').click(); };
 
-        document.getElementById('sendButton').onclick = sendMessage;
+        socket.on('update_users', (count) => { document.getElementById('user-stats').innerText = `👥 ${count}`; });
+
+        // Script de archivos (Igual que el anterior)
+        document.getElementById('file-input').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file || file.size > 1024 * 1024) return alert("Archivo máximo 1MB");
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                socket.emit('message', {name: userInput.value || "Anónimo", text: `📎 Archivo`, file: evt.target.result, fileName: file.name, fileType: file.type, room: currentRoom});
+            };
+            reader.readAsDataURL(file);
+        };
+        
+        socket.emit('join', {user: userInput.value || "Anónimo", room: currentRoom});
     </script>
 </body>
 </html>
